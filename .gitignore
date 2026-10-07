@@ -18,10 +18,8 @@ env/
 # Environment variables
 .env
 
-# Model files
-*.pth
-*.pt
-*.onnx
+!models/
+!models/best_model.pth
 
 # Dataset
 data/raw/
