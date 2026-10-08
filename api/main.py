@@ -1,9 +1,19 @@
 import sys
 from pathlib import Path
 
-import io
+# ============================================================
+# PROJECT PATH
+# ============================================================
 
-from PIL import Image
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+# ============================================================
+# IMPORTS
+# ============================================================
 
 from fastapi import (
     FastAPI,
@@ -12,492 +22,1522 @@ from fastapi import (
     HTTPException,
 )
 
-from fastapi.responses import (
-    HTMLResponse,
+from fastapi.responses import HTMLResponse
+
+from PIL import Image, UnidentifiedImageError
+
+import io
+import torch
+
+from src.config import (
+    DEVICE,
+    MODEL_DIR,
+    IMAGE_HEIGHT,
+    IMAGE_WIDTH,
+    CLASS_NAMES,
 )
 
 from src.predict import (
     predict_image,
+    MODEL_PATH,
 )
 
 
-PROJECT_ROOT = (
-    Path(__file__).resolve().parent.parent
-)
-
-if str(PROJECT_ROOT) not in sys.path:
-
-    sys.path.insert(
-        0,
-        str(PROJECT_ROOT)
-    )
-
-
-# =========================================================
-# FASTAPI
-# =========================================================
+# ============================================================
+# APP
+# ============================================================
 
 app = FastAPI(
-
     title="Visual Defect Detection API",
-
     description=(
-        "AI-powered industrial "
-        "surface defect classification"
+        "Computer Vision API for industrial "
+        "normal vs defective image classification."
     ),
-
     version="1.0.0",
 )
 
 
-# =========================================================
-# WEB PAGE
-# =========================================================
-
-HTML_PAGE = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Visual Defect Detection</title>
-<style>
-:root {
-    --bg: #e9edf1;
-    --panel: #ffffff;
-    --ink: #17202a;
-    --muted: #5d6b7a;
-    --line: #d3dae1;
-    --accent: #1d4ed8;
-    --ok: #15803d;
-    --ok-bg: #e6f4ea;
-    --bad: #b91c1c;
-    --bad-bg: #fdeaea;
-}
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #11161c;
-        --panel: #1a222b;
-        --ink: #e8edf2;
-        --muted: #93a1b0;
-        --line: #2b3642;
-        --accent: #6b9bff;
-        --ok: #4ade80;
-        --ok-bg: #12301f;
-        --bad: #f87171;
-        --bad-bg: #3a1717;
-    }
-}
-* { box-sizing: border-box; }
-body {
-    margin: 0;
-    min-height: 100vh;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
-    padding: 32px 20px;
-    display: flex;
-    justify-content: center;
-}
-.app { width: 100%; max-width: 980px; }
-header { margin-bottom: 24px; }
-h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -0.02em; }
-header p { margin: 0; color: var(--muted); max-width: 60ch; line-height: 1.5; }
-
-.grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
-.panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 20px;
-}
-.panel h2 { margin: 0 0 14px; font-size: 16px; }
-
-/* Drop zone / preview */
-.stage {
-    position: relative;
-    aspect-ratio: 4 / 3;
-    border: 2px dashed var(--line);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    overflow: hidden;
-    cursor: pointer;
-    transition: border-color .15s, background .15s;
-}
-.stage:hover, .stage.drag, .stage:focus-visible {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-    outline: none;
-}
-.stage.has-image { border-style: solid; cursor: default; background: #0b0f14; }
-.hint { color: var(--muted); padding: 20px; line-height: 1.5; }
-.hint strong { display: block; color: var(--ink); font-size: 17px; margin-bottom: 4px; }
-.stage img { width: 100%; height: 100%; object-fit: contain; display: none; }
-.stage.has-image img { display: block; }
-.stage.has-image .hint { display: none; }
-
-/* Scan line while analyzing */
-.scan {
-    position: absolute;
-    left: 0; right: 0; top: 0;
-    height: 3px;
-    background: var(--accent);
-    box-shadow: 0 0 18px 4px var(--accent);
-    display: none;
-}
-.stage.scanning .scan { display: block; animation: sweep 1.4s ease-in-out infinite alternate; }
-@keyframes sweep { from { top: 0; } to { top: calc(100% - 3px); } }
-@media (prefers-reduced-motion: reduce) {
-    .stage.scanning .scan { animation: none; top: 50%; }
-}
-
-.file-meta { margin: 10px 0 0; font-size: 13px; color: var(--muted); min-height: 18px; word-break: break-all; }
-.actions { display: flex; gap: 10px; margin-top: 14px; }
-button {
-    font: inherit;
-    border-radius: 8px;
-    padding: 12px 16px;
-    cursor: pointer;
-    border: 1px solid var(--line);
-    background: transparent;
-    color: var(--ink);
-}
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-button.primary {
-    flex: 1;
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    font-weight: 600;
-}
-@media (prefers-color-scheme: dark) { button.primary { color: #0b1220; } }
-button:disabled { opacity: .45; cursor: not-allowed; }
-
-/* Result */
-.empty { color: var(--muted); line-height: 1.5; }
-#result { display: none; }
-.verdict {
-    border-radius: 8px;
-    padding: 18px;
-    margin-bottom: 18px;
-}
-.verdict.ok { background: var(--ok-bg); color: var(--ok); }
-.verdict.bad { background: var(--bad-bg); color: var(--bad); }
-.verdict .label { font-size: 26px; font-weight: 700; margin: 0; }
-.verdict .conf { margin: 4px 0 0; font-size: 15px; }
-
-.split {
-    display: flex;
-    height: 14px;
-    border-radius: 7px;
-    overflow: hidden;
-    background: var(--line);
-}
-.split .n { background: var(--ok); width: 50%; transition: width .5s ease; }
-.split .d { background: var(--bad); width: 50%; transition: width .5s ease; }
-.legend { display: flex; justify-content: space-between; margin-top: 10px; font-size: 14px; }
-.legend span { display: block; color: var(--muted); font-size: 13px; }
-.legend b { font-size: 20px; }
-.legend .l b { color: var(--ok); }
-.legend .r { text-align: right; }
-.legend .r b { color: var(--bad); }
-
-#error {
-    display: none;
-    margin-top: 14px;
-    padding: 12px 14px;
-    border-radius: 8px;
-    background: var(--bad-bg);
-    color: var(--bad);
-    font-size: 14px;
-    line-height: 1.4;
-}
-footer { margin-top: 22px; color: var(--muted); font-size: 13px; }
-
-@media (max-width: 760px) {
-    .grid { grid-template-columns: 1fr; }
-    h1 { font-size: 25px; }
-}
-</style>
-</head>
-<body>
-<div class="app">
-    <header>
-        <h1>Visual Defect Detection</h1>
-        <p>Upload a photo of a product. The model classifies it as normal or defective and shows how sure it is.</p>
-    </header>
-
-    <div class="grid">
-        <section class="panel" aria-labelledby="img-h">
-            <h2 id="img-h">Image</h2>
-            <div class="stage" id="stage" tabindex="0" role="button"
-                 aria-label="Choose or drop an image">
-                <div class="hint">
-                    <strong>Drop an image here</strong>
-                    or click to browse, or paste from your clipboard. JPG, PNG or WebP.
-                </div>
-                <img id="preview" alt="Selected product">
-                <div class="scan"></div>
-            </div>
-            <input id="imageInput" type="file" accept="image/*" hidden>
-            <p class="file-meta" id="fileMeta"></p>
-            <div class="actions">
-                <button class="primary" id="analyzeButton" disabled>Analyze image</button>
-                <button id="clearButton" disabled>Clear</button>
-            </div>
-            <div id="error" role="alert"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="res-h" aria-live="polite">
-            <h2 id="res-h">Result</h2>
-            <p class="empty" id="empty">Results appear here after you analyze an image.</p>
-            <div id="result">
-                <div class="verdict" id="verdict">
-                    <p class="label" id="prediction"></p>
-                    <p class="conf" id="confidence"></p>
-                </div>
-                <div class="split" aria-hidden="true">
-                    <div class="n" id="barN"></div>
-                    <div class="d" id="barD"></div>
-                </div>
-                <div class="legend">
-                    <div class="l"><span>Normal</span><b id="normalProbability"></b></div>
-                    <div class="r"><span>Defective</span><b id="defectiveProbability"></b></div>
-                </div>
-            </div>
-        </section>
-    </div>
-
-    <footer>EfficientNet-B0 transfer learning &middot; PyTorch &middot; FastAPI</footer>
-</div>
-
-<script>
-const $ = (id) => document.getElementById(id);
-const stage = $("stage"), input = $("imageInput"), preview = $("preview");
-const analyzeBtn = $("analyzeButton"), clearBtn = $("clearButton");
-const MAX_MB = 10;
-let currentFile = null;
-
-function showError(msg) {
-    $("error").textContent = msg;
-    $("error").style.display = "block";
-}
-function hideError() { $("error").style.display = "none"; }
-
-function setFile(file) {
-    hideError();
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-        showError("That file is not an image. Choose a JPG, PNG or WebP file.");
-        return;
-    }
-    if (file.size > MAX_MB * 1024 * 1024) {
-        showError("The image is larger than " + MAX_MB + " MB. Choose a smaller file.");
-        return;
-    }
-    currentFile = file;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        preview.src = e.target.result;
-        stage.classList.add("has-image");
-    };
-    reader.readAsDataURL(file);
-    $("fileMeta").textContent = file.name + " (" + (file.size / 1024).toFixed(0) + " KB)";
-    analyzeBtn.disabled = false;
-    clearBtn.disabled = false;
-    $("result").style.display = "none";
-    $("empty").style.display = "block";
-}
-
-function clearAll() {
-    currentFile = null;
-    input.value = "";
-    preview.removeAttribute("src");
-    stage.classList.remove("has-image", "scanning");
-    $("fileMeta").textContent = "";
-    analyzeBtn.disabled = true;
-    clearBtn.disabled = true;
-    $("result").style.display = "none";
-    $("empty").style.display = "block";
-    hideError();
-}
-
-stage.addEventListener("click", () => { if (!currentFile) input.click(); });
-stage.addEventListener("keydown", (e) => {
-    if ((e.key === "Enter" || e.key === " ") && !currentFile) {
-        e.preventDefault();
-        input.click();
-    }
-});
-input.addEventListener("change", () => setFile(input.files[0]));
-clearBtn.addEventListener("click", clearAll);
-analyzeBtn.addEventListener("click", analyzeImage);
-
-["dragenter", "dragover"].forEach((t) =>
-    stage.addEventListener(t, (e) => { e.preventDefault(); stage.classList.add("drag"); }));
-["dragleave", "drop"].forEach((t) =>
-    stage.addEventListener(t, (e) => { e.preventDefault(); stage.classList.remove("drag"); }));
-stage.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
-
-document.addEventListener("paste", (e) => {
-    const items = e.clipboardData ? e.clipboardData.files : [];
-    if (items.length) setFile(items[0]);
-});
-
-async function analyzeImage() {
-    if (!currentFile) { showError("Choose an image first."); return; }
-    hideError();
-    analyzeBtn.disabled = true;
-    analyzeBtn.textContent = "Analyzing...";
-    stage.classList.add("scanning");
-
-    const formData = new FormData();
-    formData.append("file", currentFile);
-
-    try {
-        const response = await fetch("/predict", { method: "POST", body: formData });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Prediction failed. Try again.");
-
-        const bad = String(data.prediction).toLowerCase().includes("defect");
-        $("verdict").className = "verdict " + (bad ? "bad" : "ok");
-        $("prediction").textContent = data.prediction;
-        $("confidence").textContent = "Confidence: " + data.confidence + "%";
-
-        const n = data.normal_probability * 100;
-        const d = data.defective_probability * 100;
-        $("normalProbability").textContent = n.toFixed(2) + "%";
-        $("defectiveProbability").textContent = d.toFixed(2) + "%";
-        $("barN").style.width = n + "%";
-        $("barD").style.width = d + "%";
-
-        $("empty").style.display = "none";
-        $("result").style.display = "block";
-    } catch (err) {
-        showError(err.message);
-    } finally {
-        stage.classList.remove("scanning");
-        analyzeBtn.textContent = "Analyze image";
-        analyzeBtn.disabled = false;
-    }
-}
-</script>
-</body>
-</html>
-"""
-
-
-# =========================================================
-# HOME
-# =========================================================
-
-@app.get(
-    "/",
-    response_class=HTMLResponse
-)
-def home():
-
-    return HTML_PAGE
-
-
-# =========================================================
+# ============================================================
 # HEALTH
-# =========================================================
+# ============================================================
 
 @app.get("/health")
 def health():
 
+    model_exists = MODEL_PATH.exists()
+
     return {
-
-        "status":
-            "healthy",
-
-        "service":
-            "visual-defect-detection",
-
+        "status": "ok",
+        "service": "Visual Defect Detection API",
+        "device": str(DEVICE),
+        "model_exists": model_exists,
+        "model_path": str(MODEL_PATH),
     }
 
 
-# =========================================================
-# PREDICT
-# =========================================================
+# ============================================================
+# MODEL INFO
+# ============================================================
+
+@app.get("/model-info")
+def model_info():
+
+    return {
+        "model": "EfficientNet-B0",
+        "framework": "PyTorch",
+        "task": "Industrial Defect Classification",
+        "classes": CLASS_NAMES,
+        "input_size": f"{IMAGE_HEIGHT} × {IMAGE_WIDTH}",
+        "training": "Transfer Learning",
+        "inference_device": str(DEVICE),
+        "model_file": MODEL_PATH.name,
+        "model_available": MODEL_PATH.exists(),
+    }
+
+
+# ============================================================
+# PREDICTION FUNCTION
+# ============================================================
+
+async def run_prediction(file: UploadFile):
+
+    if not file:
+        raise HTTPException(
+            status_code=400,
+            detail="No image file was provided."
+        )
+
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+        "image/bmp",
+        "image/webp",
+        "image/tiff",
+    }
+
+    if file.content_type not in allowed_types:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported image format. "
+                "Please upload JPG, PNG, BMP, WEBP or TIFF."
+            )
+        )
+
+    try:
+
+        contents = await file.read()
+
+        if len(contents) == 0:
+
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded file is empty."
+            )
+
+        # Limit upload size to 10 MB
+        if len(contents) > 10 * 1024 * 1024:
+
+            raise HTTPException(
+                status_code=413,
+                detail="Image file is too large. Maximum size is 10 MB."
+            )
+
+        image = Image.open(
+            io.BytesIO(contents)
+        )
+
+        image.load()
+
+    except UnidentifiedImageError:
+
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is not a valid image."
+        )
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read image: {str(e)}"
+        )
+
+    try:
+
+        result = predict_image(image)
+
+        result["filename"] = file.filename
+
+        return result
+
+    except FileNotFoundError as e:
+
+        raise HTTPException(
+            status_code=503,
+            detail=str(e)
+        )
+
+    except RuntimeError as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Model inference failed: {str(e)}"
+        )
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction failed: {str(e)}"
+        )
+
+
+# ============================================================
+# PREDICTION ENDPOINTS
+# ============================================================
 
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...)
 ):
 
-    if not file.content_type:
-
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Could not determine "
-                "file type."
-            )
-        )
+    return await run_prediction(file)
 
 
-    if not file.content_type.startswith(
-        "image/"
-    ):
+@app.post("/api/predict")
+async def api_predict(
+    file: UploadFile = File(...)
+):
 
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Please upload "
-                "an image file."
-            )
-        )
+    return await run_prediction(file)
 
 
-    contents = await file.read()
+# ============================================================
+# WEB INTERFACE
+# ============================================================
+
+HTML_PAGE = r"""
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>
+Visual Defect Detection
+</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+
+    margin: 0;
+
+    font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    background:
+        radial-gradient(
+            circle at top left,
+            #1e293b,
+            #0f172a 45%,
+            #020617
+        );
+
+    color: #f8fafc;
+
+    min-height: 100vh;
+}
+
+.container {
+
+    width: min(1180px, 92%);
+
+    margin: auto;
+}
+
+header {
+
+    padding: 28px 0;
+
+    border-bottom:
+        1px solid rgba(255,255,255,0.08);
+}
+
+.nav {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+}
+
+.logo {
+
+    font-size: 22px;
+
+    font-weight: 800;
+
+    letter-spacing: -0.5px;
+}
+
+.logo span {
+
+    color: #38bdf8;
+}
+
+.status {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    background:
+        rgba(34,197,94,0.12);
+
+    border:
+        1px solid rgba(34,197,94,0.25);
+
+    color: #86efac;
+
+    padding: 8px 13px;
+
+    border-radius: 999px;
+
+    font-size: 13px;
+}
+
+.status-dot {
+
+    width: 8px;
+
+    height: 8px;
+
+    border-radius: 50%;
+
+    background: #22c55e;
+}
+
+.hero {
+
+    padding: 55px 0 30px;
+}
+
+.hero h1 {
+
+    margin: 0;
+
+    font-size:
+        clamp(36px, 5vw, 58px);
+
+    line-height: 1.05;
+
+    letter-spacing: -2px;
+}
+
+.hero h1 span {
+
+    color: #38bdf8;
+}
+
+.hero p {
+
+    max-width: 680px;
+
+    color: #94a3b8;
+
+    font-size: 17px;
+
+    line-height: 1.7;
+
+    margin-top: 20px;
+}
+
+.grid {
+
+    display: grid;
+
+    grid-template-columns:
+        minmax(0, 1.5fr)
+        minmax(300px, 0.8fr);
+
+    gap: 24px;
+
+    padding-bottom: 60px;
+}
+
+.card {
+
+    background:
+        rgba(15,23,42,0.75);
+
+    border:
+        1px solid rgba(255,255,255,0.09);
+
+    border-radius: 20px;
+
+    padding: 26px;
+
+    backdrop-filter: blur(16px);
+
+    box-shadow:
+        0 20px 50px
+        rgba(0,0,0,0.25);
+}
+
+.card h2 {
+
+    margin-top: 0;
+
+    font-size: 19px;
+}
+
+.upload-area {
+
+    min-height: 360px;
+
+    border:
+        2px dashed #334155;
+
+    border-radius: 16px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 25px;
+
+    text-align: center;
+
+    cursor: pointer;
+
+    transition: 0.25s;
+}
+
+.upload-area:hover,
+.upload-area.dragover {
+
+    border-color: #38bdf8;
+
+    background:
+        rgba(56,189,248,0.05);
+}
+
+.upload-icon {
+
+    font-size: 48px;
+
+    margin-bottom: 12px;
+}
+
+.upload-area strong {
+
+    font-size: 18px;
+}
+
+.upload-area p {
+
+    color: #64748b;
+
+    margin: 10px 0 20px;
+}
+
+input[type=file] {
+
+    display: none;
+}
+
+.preview {
+
+    max-width: 100%;
+
+    max-height: 300px;
+
+    border-radius: 12px;
+
+    display: none;
+
+    object-fit: contain;
+}
+
+.file-name {
+
+    margin-top: 15px;
+
+    color: #94a3b8;
+
+    font-size: 13px;
+
+    word-break: break-word;
+}
+
+button {
+
+    width: 100%;
+
+    border: 0;
+
+    border-radius: 12px;
+
+    padding: 15px;
+
+    margin-top: 18px;
+
+    font-size: 16px;
+
+    font-weight: 700;
+
+    cursor: pointer;
+
+    background:
+        linear-gradient(
+            135deg,
+            #0ea5e9,
+            #2563eb
+        );
+
+    color: white;
+
+    transition: 0.2s;
+}
+
+button:hover {
+
+    transform: translateY(-1px);
+
+    box-shadow:
+        0 10px 30px
+        rgba(14,165,233,0.25);
+}
+
+button:disabled {
+
+    opacity: 0.5;
+
+    cursor: not-allowed;
+
+    transform: none;
+}
+
+.result {
+
+    display: none;
+
+    margin-top: 24px;
+
+    border-radius: 16px;
+
+    padding: 22px;
+
+    border: 1px solid #334155;
+}
+
+.result.normal {
+
+    background:
+        rgba(34,197,94,0.08);
+
+    border-color:
+        rgba(34,197,94,0.3);
+}
+
+.result.defective {
+
+    background:
+        rgba(239,68,68,0.08);
+
+    border-color:
+        rgba(239,68,68,0.3);
+}
+
+.result-label {
+
+    color: #94a3b8;
+
+    font-size: 13px;
+
+    text-transform: uppercase;
+
+    letter-spacing: 1px;
+}
+
+.result-value {
+
+    font-size: 36px;
+
+    font-weight: 800;
+
+    margin: 5px 0 20px;
+}
+
+.metric {
+
+    margin-top: 14px;
+}
+
+.metric-row {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    margin-bottom: 6px;
+
+    font-size: 13px;
+
+    color: #cbd5e1;
+}
+
+.bar {
+
+    height: 8px;
+
+    border-radius: 20px;
+
+    background: #1e293b;
+
+    overflow: hidden;
+}
+
+.bar-fill {
+
+    height: 100%;
+
+    border-radius: 20px;
+
+    background:
+        linear-gradient(
+            90deg,
+            #0ea5e9,
+            #38bdf8
+        );
+
+    transition: width 0.5s ease;
+}
+
+.model-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap: 12px;
+}
+
+.model-item {
+
+    padding: 15px;
+
+    background:
+        rgba(255,255,255,0.035);
+
+    border-radius: 12px;
+
+    border: 1px solid
+        rgba(255,255,255,0.05);
+}
+
+.model-item small {
+
+    display: block;
+
+    color: #64748b;
+
+    margin-bottom: 5px;
+}
+
+.model-item strong {
+
+    font-size: 14px;
+}
+
+.info {
+
+    margin-top: 20px;
+
+    color: #64748b;
+
+    font-size: 13px;
+
+    line-height: 1.6;
+}
+
+.error {
+
+    display: none;
+
+    margin-top: 18px;
+
+    padding: 14px;
+
+    border-radius: 10px;
+
+    background:
+        rgba(239,68,68,0.1);
+
+    border:
+        1px solid
+        rgba(239,68,68,0.3);
+
+    color: #fca5a5;
+
+    font-size: 14px;
+}
+
+.loading {
+
+    display: none;
+
+    text-align: center;
+
+    padding: 15px;
+
+    color: #38bdf8;
+}
+
+footer {
+
+    border-top:
+        1px solid rgba(255,255,255,0.08);
+
+    padding: 25px 0;
+
+    color: #64748b;
+
+    font-size: 13px;
+
+    text-align: center;
+}
+
+@media(max-width: 850px) {
+
+    .grid {
+
+        grid-template-columns: 1fr;
+    }
+
+    .model-grid {
+
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media(max-width: 500px) {
+
+    .model-grid {
+
+        grid-template-columns: 1fr;
+    }
+}
+
+</style>
+
+</head>
 
 
-    if len(contents) == 0:
+<body>
 
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Uploaded file is empty."
-            )
-        )
+<header>
 
+<div class="container nav">
 
-    try:
+<div class="logo">
+Vision<span>Defect</span>
+</div>
 
-        image = Image.open(
-            io.BytesIO(
-                contents
-            )
-        ).convert(
-            "RGB"
-        )
+<div class="status">
 
-    except Exception:
+<div class="status-dot"></div>
 
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Invalid or corrupted "
-                "image."
-            )
-        )
+API Online
+
+</div>
+
+</div>
+
+</header>
 
 
-    try:
+<main class="container">
 
-        result = predict_image(
-            image
-        )
+<section class="hero">
 
-        return result
+<h1>
+Industrial Visual<br>
+<span>Defect Detection</span>
+</h1>
 
-    except Exception as e:
+<p>
+Upload an industrial product image and let the
+deep learning model classify it as Normal or
+Defective with confidence scores.
+</p>
 
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+</section>
+
+
+<section class="grid">
+
+
+<!-- ======================================================
+UPLOAD
+======================================================= -->
+
+<div class="card">
+
+<h2>
+Image Analysis
+</h2>
+
+<div
+    class="upload-area"
+    id="uploadArea"
+>
+
+<div
+    class="upload-icon"
+>
+⌁
+</div>
+
+<strong>
+Drop your image here
+</strong>
+
+<p>
+or click to browse
+</p>
+
+<input
+    type="file"
+    id="fileInput"
+    accept="image/*"
+/>
+
+<img
+    id="preview"
+    class="preview"
+/>
+
+<div
+    id="fileName"
+    class="file-name"
+></div>
+
+</div>
+
+
+<button
+    id="analyzeButton"
+    disabled
+>
+Analyze Image
+</button>
+
+
+<div
+    id="loading"
+    class="loading"
+>
+Analyzing image...
+</div>
+
+
+<div
+    id="error"
+    class="error"
+></div>
+
+
+<div
+    id="result"
+    class="result"
+>
+
+<div class="result-label">
+Prediction
+</div>
+
+<div
+    id="prediction"
+    class="result-value"
+>
+-
+</div>
+
+
+<div class="metric">
+
+<div class="metric-row">
+
+<span>
+Confidence
+</span>
+
+<strong id="confidence">
+0%
+</strong>
+
+</div>
+
+<div class="bar">
+
+<div
+    id="confidenceBar"
+    class="bar-fill"
+    style="width:0%"
+></div>
+
+</div>
+
+</div>
+
+
+<div class="metric">
+
+<div class="metric-row">
+
+<span>
+Normal Probability
+</span>
+
+<strong id="normalProbability">
+0%
+</strong>
+
+</div>
+
+<div class="bar">
+
+<div
+    id="normalBar"
+    class="bar-fill"
+    style="width:0%"
+></div>
+
+</div>
+
+</div>
+
+
+<div class="metric">
+
+<div class="metric-row">
+
+<span>
+Defective Probability
+</span>
+
+<strong id="defectiveProbability">
+0%
+</strong>
+
+</div>
+
+<div class="bar">
+
+<div
+    id="defectiveBar"
+    class="bar-fill"
+    style="width:0%"
+></div>
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+
+<!-- ======================================================
+MODEL INFO
+======================================================= -->
+
+<div class="card">
+
+<h2>
+Model Information
+</h2>
+
+<div class="model-grid">
+
+<div class="model-item">
+
+<small>
+Architecture
+</small>
+
+<strong id="modelName">
+Loading...
+</strong>
+
+</div>
+
+
+<div class="model-item">
+
+<small>
+Framework
+</small>
+
+<strong id="framework">
+Loading...
+</strong>
+
+</div>
+
+
+<div class="model-item">
+
+<small>
+Task
+</small>
+
+<strong id="task">
+Loading...
+</strong>
+
+</div>
+
+
+<div class="model-item">
+
+<small>
+Input
+</small>
+
+<strong id="inputSize">
+Loading...
+</strong>
+
+</div>
+
+
+<div class="model-item">
+
+<small>
+Classes
+</small>
+
+<strong id="classes">
+Loading...
+</strong>
+
+</div>
+
+
+<div class="model-item">
+
+<small>
+Inference
+</small>
+
+<strong id="device">
+Loading...
+</strong>
+
+</div>
+
+</div>
+
+
+<div class="info">
+
+<strong>
+Deployment
+</strong>
+
+<p>
+The trained EfficientNet-B0 model is loaded
+from the application's <code>models</code> directory.
+The application automatically uses CUDA when
+available and CPU otherwise.
+</p>
+
+<strong>
+Model Status
+</strong>
+
+<p id="modelStatus">
+Checking model...
+</p>
+
+</div>
+
+</div>
+
+</section>
+
+</main>
+
+
+<footer>
+
+Visual Defect Detection System ·
+PyTorch · EfficientNet-B0
+
+</footer>
+
+
+<script>
+
+const uploadArea =
+    document.getElementById("uploadArea");
+
+const fileInput =
+    document.getElementById("fileInput");
+
+const preview =
+    document.getElementById("preview");
+
+const fileName =
+    document.getElementById("fileName");
+
+const analyzeButton =
+    document.getElementById("analyzeButton");
+
+const loading =
+    document.getElementById("loading");
+
+const errorBox =
+    document.getElementById("error");
+
+const result =
+    document.getElementById("result");
+
+
+let selectedFile = null;
+
+
+// ========================================================
+// FILE SELECTION
+// ========================================================
+
+uploadArea.addEventListener(
+    "click",
+    () => fileInput.click()
+);
+
+
+fileInput.addEventListener(
+    "change",
+    event => {
+
+        const file =
+            event.target.files[0];
+
+        handleFile(file);
+    }
+);
+
+
+uploadArea.addEventListener(
+    "dragover",
+    event => {
+
+        event.preventDefault();
+
+        uploadArea.classList.add(
+            "dragover"
+        );
+    }
+);
+
+
+uploadArea.addEventListener(
+    "dragleave",
+    () => {
+
+        uploadArea.classList.remove(
+            "dragover"
+        );
+    }
+);
+
+
+uploadArea.addEventListener(
+    "drop",
+    event => {
+
+        event.preventDefault();
+
+        uploadArea.classList.remove(
+            "dragover"
+        );
+
+        const file =
+            event.dataTransfer.files[0];
+
+        handleFile(file);
+    }
+);
+
+
+function handleFile(file) {
+
+    if (!file) {
+        return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+
+        showError(
+            "Please select a valid image."
+        );
+
+        return;
+    }
+
+    selectedFile = file;
+
+    const reader =
+        new FileReader();
+
+    reader.onload = event => {
+
+        preview.src =
+            event.target.result;
+
+        preview.style.display =
+            "block";
+
+    };
+
+    reader.readAsDataURL(file);
+
+    fileName.textContent =
+        file.name;
+
+    analyzeButton.disabled =
+        false;
+
+    errorBox.style.display =
+        "none";
+
+    result.style.display =
+        "none";
+}
+
+
+// ========================================================
+// ANALYZE
+// ========================================================
+
+analyzeButton.addEventListener(
+    "click",
+    async () => {
+
+        if (!selectedFile) {
+            return;
+        }
+
+        const formData =
+            new FormData();
+
+        formData.append(
+            "file",
+            selectedFile
+        );
+
+        loading.style.display =
+            "block";
+
+        analyzeButton.disabled =
+            true;
+
+        errorBox.style.display =
+            "none";
+
+        result.style.display =
+            "none";
+
+        try {
+
+            const response =
+                await fetch(
+                    "/api/predict",
+                    {
+                        method: "POST",
+                        body: formData
+                    }
+                );
+
+
+            const contentType =
+                response.headers.get(
+                    "content-type"
+                ) || "";
+
+
+            // Prevent:
+            // Unexpected token '<'
+            if (!contentType.includes(
+                "application/json"
+            )) {
+
+                const text =
+                    await response.text();
+
+                throw new Error(
+                    "Server returned a non-JSON response. " +
+                    "HTTP " +
+                    response.status +
+                    ". " +
+                    text.substring(0, 200)
+                );
+            }
+
+
+            const data =
+                await response.json();
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    data.detail ||
+                    "Prediction failed."
+                );
+            }
+
+
+            displayResult(data);
+
+        }
+
+        catch (error) {
+
+            showError(
+                error.message
+            );
+
+        }
+
+        finally {
+
+            loading.style.display =
+                "none";
+
+            analyzeButton.disabled =
+                false;
+        }
+
+    }
+);
+
+
+// ========================================================
+// DISPLAY RESULT
+// ========================================================
+
+function displayResult(data) {
+
+    const prediction =
+        data.prediction;
+
+    const confidence =
+        Number(data.confidence);
+
+    const normal =
+        Number(data.normal_probability);
+
+    const defective =
+        Number(data.defective_probability);
+
+
+    document.getElementById(
+        "prediction"
+    ).textContent =
+        prediction;
+
+
+    document.getElementById(
+        "confidence"
+    ).textContent =
+        confidence + "%";
+
+
+    document.getElementById(
+        "normalProbability"
+    ).textContent =
+        normal + "%";
+
+
+    document.getElementById(
+        "defectiveProbability"
+    ).textContent =
+        defective + "%";
+
+
+    document.getElementById(
+        "confidenceBar"
+    ).style.width =
+        confidence + "%";
+
+
+    document.getElementById(
+        "normalBar"
+    ).style.width =
+        normal + "%";
+
+
+    document.getElementById(
+        "defectiveBar"
+    ).style.width =
+        defective + "%";
+
+
+    result.className =
+        "result " +
+        (
+            prediction === "Defective"
+                ? "defective"
+                : "normal"
+        );
+
+
+    result.style.display =
+        "block";
+}
+
+
+// ========================================================
+// ERROR
+// ========================================================
+
+function showError(message) {
+
+    errorBox.textContent =
+        message;
+
+    errorBox.style.display =
+        "block";
+}
+
+
+// ========================================================
+// MODEL INFORMATION
+// ========================================================
+
+async function loadModelInfo() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/model-info"
+            );
+
+
+        const data =
+            await response.json();
+
+
+        document.getElementById(
+            "modelName"
+        ).textContent =
+            data.model;
+
+
+        document.getElementById(
+            "framework"
+        ).textContent =
+            data.framework;
+
+
+        document.getElementById(
+            "task"
+        ).textContent =
+            data.task;
+
+
+        document.getElementById(
+            "inputSize"
+        ).textContent =
+            data.input_size;
+
+
+        document.getElementById(
+            "classes"
+        ).textContent =
+            data.classes.join(
+                " / "
+            );
+
+
+        document.getElementById(
+            "device"
+        ).textContent =
+            data.inference_device;
+
+
+        document.getElementById(
+            "modelStatus"
+        ).textContent =
+            data.model_available
+                ? "Trained model loaded and available."
+                : "Model file is missing.";
+
+    }
+
+    catch (error) {
+
+        document.getElementById(
+            "modelStatus"
+        ).textContent =
+            "Could not retrieve model information.";
+    }
+}
+
+
+loadModelInfo();
+
+</script>
+
+</body>
+
+</html>
+"""
+
+
+# ============================================================
+# HOME
+# ============================================================
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+
+    return HTML_PAGE

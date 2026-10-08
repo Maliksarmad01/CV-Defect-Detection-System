@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Virtual environment
+# Virtual environments
 .venv/
 venv/
 env/
@@ -15,9 +15,15 @@ env/
 .vscode/
 .idea/
 
-# Environment variables
+# Environment
 .env
 
+# Model files
+*.pth
+*.pt
+*.onnx
+
+# Deployment model
 !models/
 !models/best_model.pth
 
@@ -32,4 +38,3 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
-!models/best_model.pth

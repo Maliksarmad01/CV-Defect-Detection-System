@@ -1,8 +1,19 @@
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+import random
+
 import numpy as np
 import pandas as pd
+
+import torch
+import torch.nn as nn
 
 from sklearn.metrics import (
     accuracy_score,
@@ -11,79 +22,176 @@ from sklearn.metrics import (
     f1_score,
 )
 
-
-PROJECT_ROOT = (
-    Path(__file__).resolve().parent.parent
-)
-
-if str(PROJECT_ROOT) not in sys.path:
-
-    sys.path.insert(
-        0,
-        str(PROJECT_ROOT)
-    )
-
-
-import torch
-
-import torch.nn as nn
-
-from torch.optim import AdamW
-
-from torch.optim.lr_scheduler import (
-    ReduceLROnPlateau
-)
-
-from tqdm import tqdm
-
 from src.config import (
     DEVICE,
+    TRAIN_DIR,
+    MODEL_DIR,
+    METRICS_DIR,
     EPOCHS,
     LEARNING_RATE,
     WEIGHT_DECAY,
-    MODEL_DIR,
-    METRICS_DIR,
+    RANDOM_SEED,
 )
 
-from src.model import (
-    create_model
+from src.dataset import (
+    build_dataframe,
+    assign_labels,
+    create_split,
+    create_dataloaders,
 )
 
-
-# =========================================================
-# TRAIN ONE EPOCH
-# =========================================================
-
-def train_one_epoch(
-    model,
-    loader,
-    criterion,
-    optimizer,
-    scaler,
-):
-
-    model.train()
-
-    total_loss = 0
-
-    all_labels = []
-
-    all_predictions = []
+from src.model import create_model
 
 
-    progress = tqdm(
-        loader,
-        desc="Training",
-        leave=False
+# ============================================================
+# REPRODUCIBILITY
+# ============================================================
+
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+torch.manual_seed(RANDOM_SEED)
+
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(
+        RANDOM_SEED
     )
 
 
-    for batch in progress:
+# ============================================================
+# DATA
+# ============================================================
 
-        images = batch[0]
+df = build_dataframe(
+    TRAIN_DIR
+)
 
-        labels = batch[1]
+df = assign_labels(
+    df
+)
 
+train_df, val_df = create_split(
+    df
+)
+
+train_loader, val_loader = create_dataloaders(
+    train_df,
+    val_df
+)
+
+
+print(
+    f"Training samples: {len(train_df)}"
+)
+
+print(
+    f"Validation samples: {len(val_df)}"
+)
+
+print(
+    "\nTraining distribution:"
+)
+
+print(
+    train_df["label"].value_counts()
+)
+
+
+# ============================================================
+# MODEL
+# ============================================================
+
+model = create_model(
+    num_classes=2
+)
+
+model = model.to(DEVICE)
+
+
+# ============================================================
+# CLASS WEIGHTS
+# ============================================================
+
+class_counts = np.bincount(
+    train_df["label"].values,
+    minlength=2
+)
+
+class_weights = (
+    len(train_df)
+    /
+    (2.0 * class_counts)
+)
+
+class_weights = torch.tensor(
+    class_weights,
+    dtype=torch.float32,
+    device=DEVICE
+)
+
+print(
+    "Class weights:",
+    class_weights
+)
+
+
+# ============================================================
+# LOSS / OPTIMIZER
+# ============================================================
+
+criterion = nn.CrossEntropyLoss(
+    weight=class_weights
+)
+
+optimizer = torch.optim.AdamW(
+    model.parameters(),
+    lr=LEARNING_RATE,
+    weight_decay=WEIGHT_DECAY
+)
+
+
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer,
+    mode="max",
+    factor=0.5,
+    patience=2
+)
+
+
+# ============================================================
+# AMP
+# ============================================================
+
+use_amp = DEVICE.type == "cuda"
+
+scaler = torch.amp.GradScaler(
+    "cuda",
+    enabled=use_amp
+)
+
+
+# ============================================================
+# HISTORY
+# ============================================================
+
+history = []
+
+best_f1 = -1.0
+
+
+# ============================================================
+# TRAINING
+# ============================================================
+
+for epoch in range(EPOCHS):
+
+    model.train()
+
+    train_loss = 0.0
+
+    train_true = []
+    train_pred = []
+
+    for images, labels, _ in train_loader:
 
         images = images.to(
             DEVICE,
@@ -95,33 +203,25 @@ def train_one_epoch(
             non_blocking=True
         )
 
-
         optimizer.zero_grad(
             set_to_none=True
         )
 
-
         with torch.amp.autocast(
-            device_type="cuda",
-            enabled=(
-                DEVICE.type == "cuda"
-            ),
+            device_type=DEVICE.type,
+            enabled=use_amp
         ):
 
-            outputs = model(
-                images
-            )
+            outputs = model(images)
 
             loss = criterion(
                 outputs,
                 labels
             )
 
-
         scaler.scale(
             loss
         ).backward()
-
 
         scaler.step(
             optimizer
@@ -129,87 +229,73 @@ def train_one_epoch(
 
         scaler.update()
 
-
-        total_loss += (
+        train_loss += (
             loss.item()
-            * images.size(0)
+            *
+            images.size(0)
         )
 
-
-        predictions = (
-            torch.argmax(
-                outputs,
-                dim=1
-            )
+        predictions = torch.argmax(
+            outputs,
+            dim=1
         )
 
-
-        all_labels.extend(
+        train_true.extend(
             labels.detach()
             .cpu()
             .numpy()
         )
 
-        all_predictions.extend(
+        train_pred.extend(
             predictions.detach()
             .cpu()
             .numpy()
         )
 
 
-    average_loss = (
-        total_loss
-        / len(loader.dataset)
+    train_loss /= len(
+        train_loader.dataset
     )
 
 
-    f1 = f1_score(
-        all_labels,
-        all_predictions,
-        zero_division=0,
+    train_accuracy = accuracy_score(
+        train_true,
+        train_pred
+    )
+
+    train_precision = precision_score(
+        train_true,
+        train_pred,
+        zero_division=0
+    )
+
+    train_recall = recall_score(
+        train_true,
+        train_pred,
+        zero_division=0
+    )
+
+    train_f1 = f1_score(
+        train_true,
+        train_pred,
+        zero_division=0
     )
 
 
-    accuracy = accuracy_score(
-        all_labels,
-        all_predictions
-    )
-
-
-    return {
-        "loss": average_loss,
-        "accuracy": accuracy,
-        "f1": f1,
-    }
-
-
-# =========================================================
-# VALIDATION
-# =========================================================
-
-def validate(
-    model,
-    loader,
-    criterion
-):
+    # ========================================================
+    # VALIDATION
+    # ========================================================
 
     model.eval()
 
-    total_loss = 0
+    val_loss = 0.0
 
-    all_labels = []
+    val_true = []
+    val_pred = []
 
-    all_predictions = []
+    with torch.inference_mode():
 
-
-    with torch.no_grad():
-
-        for batch in loader:
-
-            images = batch[0]
-
-            labels = batch[1]
-
+        for images, labels, _ in val_loader:
 
             images = images.to(
                 DEVICE,
@@ -221,391 +307,195 @@ def validate(
                 non_blocking=True
             )
 
+            outputs = model(
+                images
+            )
 
-            with torch.amp.autocast(
-                device_type="cuda",
-                enabled=(
-                    DEVICE.type == "cuda"
-                ),
-            ):
+            loss = criterion(
+                outputs,
+                labels
+            )
 
-                outputs = model(
-                    images
-                )
-
-                loss = criterion(
-                    outputs,
-                    labels
-                )
-
-
-            total_loss += (
+            val_loss += (
                 loss.item()
-                * images.size(0)
+                *
+                images.size(0)
             )
 
-
-            predictions = (
-                torch.argmax(
-                    outputs,
-                    dim=1
-                )
+            predictions = torch.argmax(
+                outputs,
+                dim=1
             )
 
-
-            all_labels.extend(
+            val_true.extend(
                 labels.cpu().numpy()
             )
 
-            all_predictions.extend(
+            val_pred.extend(
                 predictions.cpu().numpy()
             )
 
 
-    average_loss = (
-        total_loss
-        / len(loader.dataset)
+    val_loss /= len(
+        val_loader.dataset
     )
 
 
-    accuracy = accuracy_score(
-        all_labels,
-        all_predictions
+    val_accuracy = accuracy_score(
+        val_true,
+        val_pred
+    )
+
+    val_precision = precision_score(
+        val_true,
+        val_pred,
+        zero_division=0
+    )
+
+    val_recall = recall_score(
+        val_true,
+        val_pred,
+        zero_division=0
+    )
+
+    val_f1 = f1_score(
+        val_true,
+        val_pred,
+        zero_division=0
     )
 
 
-    precision = precision_score(
-        all_labels,
-        all_predictions,
-        zero_division=0,
+    scheduler.step(
+        val_f1
     )
 
 
-    recall = recall_score(
-        all_labels,
-        all_predictions,
-        zero_division=0,
-    )
+    current_lr = optimizer.param_groups[0]["lr"]
 
 
-    f1 = f1_score(
-        all_labels,
-        all_predictions,
-        zero_division=0,
-    )
+    row = {
 
+        "epoch":
+            epoch + 1,
 
-    return {
-        "loss": average_loss,
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
+        "train_loss":
+            train_loss,
+
+        "train_accuracy":
+            train_accuracy,
+
+        "train_precision":
+            train_precision,
+
+        "train_recall":
+            train_recall,
+
+        "train_f1":
+            train_f1,
+
+        "val_loss":
+            val_loss,
+
+        "val_accuracy":
+            val_accuracy,
+
+        "val_precision":
+            val_precision,
+
+        "val_recall":
+            val_recall,
+
+        "val_f1":
+            val_f1,
+
+        "learning_rate":
+            current_lr,
     }
 
-
-# =========================================================
-# TRAIN MODEL
-# =========================================================
-
-def train_model(
-    train_loader,
-    val_loader,
-    train_labels,
-):
-
-    model = create_model(
-        num_classes=2
-    )
-
-
-    model = model.to(
-        DEVICE
-    )
-
-
-    # -----------------------------------------------------
-    # CLASS WEIGHTS
-    # -----------------------------------------------------
-
-    class_counts = np.bincount(
-        train_labels,
-        minlength=2
-    )
-
-
-    class_weights = (
-        len(train_labels)
-        /
-        (
-            2
-            * class_counts
-        )
-    )
-
-
-    class_weights = torch.tensor(
-        class_weights,
-        dtype=torch.float32,
-        device=DEVICE,
-    )
+    history.append(row)
 
 
     print(
-        "Class counts:",
-        class_counts
+        f"\nEpoch {epoch + 1}/{EPOCHS}"
     )
 
     print(
-        "Class weights:",
-        class_weights
+        f"Train Loss: {train_loss:.4f} | "
+        f"Train Acc: {train_accuracy:.4f} | "
+        f"Train F1: {train_f1:.4f}"
+    )
+
+    print(
+        f"Val Loss: {val_loss:.4f} | "
+        f"Val Acc: {val_accuracy:.4f} | "
+        f"Val F1: {val_f1:.4f}"
     )
 
 
-    criterion = nn.CrossEntropyLoss(
-        weight=class_weights
-    )
+    # ========================================================
+    # SAVE BEST MODEL
+    # ========================================================
 
+    if val_f1 > best_f1:
 
-    optimizer = AdamW(
-        model.parameters(),
-        lr=LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY,
-    )
+        best_f1 = val_f1
 
+        checkpoint = {
 
-    scheduler = (
-        ReduceLROnPlateau(
-            optimizer,
-            mode="max",
-            factor=0.5,
-            patience=2,
-        )
-    )
+            "epoch":
+                epoch + 1,
 
+            "model_state_dict":
+                model.state_dict(),
 
-    scaler = torch.amp.GradScaler(
-        "cuda",
-        enabled=(
-            DEVICE.type == "cuda"
-        ),
-    )
+            "optimizer_state_dict":
+                optimizer.state_dict(),
 
-
-    best_f1 = -1
-
-    history = []
-
-
-    # =====================================================
-    # EPOCHS
-    # =====================================================
-
-    for epoch in range(
-        1,
-        EPOCHS + 1
-    ):
-
-        print(
-            f"\nEpoch "
-            f"{epoch}/{EPOCHS}"
-        )
-
-
-        train_metrics = (
-            train_one_epoch(
-                model,
-                train_loader,
-                criterion,
-                optimizer,
-                scaler,
-            )
-        )
-
-
-        val_metrics = (
-            validate(
-                model,
-                val_loader,
-                criterion,
-            )
-        )
-
-
-        scheduler.step(
-            val_metrics["f1"]
-        )
-
-
-        current_lr = (
-            optimizer.param_groups[0]["lr"]
-        )
-
-
-        print(
-            f"Train Loss: "
-            f"{train_metrics['loss']:.4f}"
-        )
-
-        print(
-            f"Train Acc: "
-            f"{train_metrics['accuracy']:.4f}"
-        )
-
-        print(
-            f"Train F1: "
-            f"{train_metrics['f1']:.4f}"
-        )
-
-        print(
-            f"Val Loss: "
-            f"{val_metrics['loss']:.4f}"
-        )
-
-        print(
-            f"Val Acc: "
-            f"{val_metrics['accuracy']:.4f}"
-        )
-
-        print(
-            f"Val Precision: "
-            f"{val_metrics['precision']:.4f}"
-        )
-
-        print(
-            f"Val Recall: "
-            f"{val_metrics['recall']:.4f}"
-        )
-
-        print(
-            f"Val F1: "
-            f"{val_metrics['f1']:.4f}"
-        )
-
-        print(
-            f"Learning Rate: "
-            f"{current_lr:.7f}"
-        )
-
-
-        history.append({
-
-            "epoch": epoch,
-
-            "train_loss":
-                train_metrics["loss"],
-
-            "train_accuracy":
-                train_metrics["accuracy"],
-
-            "train_f1":
-                train_metrics["f1"],
-
-            "val_loss":
-                val_metrics["loss"],
+            "best_val_f1":
+                best_f1,
 
             "val_accuracy":
-                val_metrics["accuracy"],
+                val_accuracy,
 
             "val_precision":
-                val_metrics["precision"],
+                val_precision,
 
             "val_recall":
-                val_metrics["recall"],
+                val_recall,
+        }
 
-            "val_f1":
-                val_metrics["f1"],
+        torch.save(
+            checkpoint,
+            MODEL_DIR / "best_model.pth"
+        )
 
-            "learning_rate":
-                current_lr,
-        })
-
-
-        # -------------------------------------------------
-        # SAVE BEST MODEL
-        # -------------------------------------------------
-
-        if (
-            val_metrics["f1"]
-            > best_f1
-        ):
-
-            best_f1 = (
-                val_metrics["f1"]
-            )
+        print(
+            "Best model saved."
+        )
 
 
-            checkpoint = {
+# ============================================================
+# SAVE HISTORY
+# ============================================================
 
-                "model_state_dict":
-                    model.state_dict(),
+history_df = pd.DataFrame(
+    history
+)
 
-                "num_classes": 2,
-
-                "class_names": [
-                    "Normal",
-                    "Defective",
-                ],
-
-                "image_size": (
-                    256,
-                    640
-                ),
-
-                "best_val_f1":
-                    best_f1,
-
-                "epoch":
-                    epoch,
-
-                "optimizer_state_dict":
-                    optimizer.state_dict(),
-
-                "val_metrics":
-                    val_metrics,
-            }
+history_df.to_csv(
+    METRICS_DIR / "training_history.csv",
+    index=False
+)
 
 
-            torch.save(
-                checkpoint,
-                MODEL_DIR
-                / "best_model.pth"
-            )
+print(
+    "\nTraining complete."
+)
 
+print(
+    f"Best validation F1: {best_f1:.4f}"
+)
 
-            print(
-                "✓ Best model saved."
-            )
-
-
-    # =====================================================
-    # SAVE HISTORY
-    # =====================================================
-
-    history_df = pd.DataFrame(
-        history
-    )
-
-    history_df.to_csv(
-        METRICS_DIR
-        / "training_history.csv",
-        index=False,
-    )
-
-
-    return (
-        model,
-        history_df
-    )
-
-
-if __name__ == "__main__":
-
-    print(
-        "Training module loaded."
-    )
-
-    print(
-        "Run training from "
-        "02_training.ipynb"
-    )
+print(
+    f"Model: {MODEL_DIR / 'best_model.pth'}"
+)
