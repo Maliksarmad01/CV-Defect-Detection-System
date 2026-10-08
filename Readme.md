@@ -12,19 +12,20 @@ A binary visual defect classifier (**normal** vs. **defective**) for industrial 
 ## Table of Contents
 
 1. [Results at a Glance](#results-at-a-glance)
-2. [System Architecture](#system-architecture)
-3. [Quick Start](#quick-start)
-4. [Inference API](#inference-api)
-5. [Model Approach](#model-approach)
-6. [Dataset Strategy](#dataset-strategy)
-7. [Evaluation Results](#evaluation-results)
-8. [Evaluation Correction Notice](#evaluation-correction-notice)
-9. [Example Predictions](#example-predictions)
-10. [Reproducing Training](#reproducing-training)
-11. [Known Limitations](#known-limitations)
-12. [Roadmap](#roadmap)
-13. [Repository Layout](#repository-layout)
-14. [Acknowledgements and License](#acknowledgements-and-license)
+2. [Application Screenshots](#application-screenshots)
+3. [System Architecture](#system-architecture)
+4. [Quick Start](#quick-start)
+5. [Inference API](#inference-api)
+6. [Model Approach](#model-approach)
+7. [Dataset Strategy](#dataset-strategy)
+8. [Evaluation Results](#evaluation-results)
+9. [Evaluation Correction Notice](#evaluation-correction-notice)
+10. [Example Predictions](#example-predictions)
+11. [Reproducing Training](#reproducing-training)
+12. [Known Limitations](#known-limitations)
+13. [Roadmap](#roadmap)
+14. [Repository Layout](#repository-layout)
+15. [Acknowledgements and License](#acknowledgements-and-license)
 
 ---
 
@@ -44,6 +45,40 @@ Evaluated on the **1,004 official test images** (110 defective, 894 normal). Def
 Because defects are rare (~11% of the test set, ~5% of training data), accuracy alone is misleading. Precision, recall, F1 and PR-AUC are the primary metrics for this project.
 
 ![Confusion matrix](docs/confusion_matrix.png)
+
+---
+
+## Application Screenshots
+
+The web interface lets users register, sign in, upload an image and view the prediction.
+
+### Home
+
+![Home page](docs/screenshots/home.png)
+
+### Sign Up
+
+![Sign up page](docs/screenshots/signup.png)
+
+### Login
+
+![Login page](docs/screenshots/login.png)
+
+### Upload and Predict
+
+![Upload page](docs/screenshots/upload.png)
+
+### Prediction Result: Defective
+
+![Defective result](docs/screenshots/result_defective.png)
+
+### Prediction Result: Normal
+
+![Normal result](docs/screenshots/result_normal.png)
+
+### Interactive API Docs (Swagger UI)
+
+![Swagger UI](docs/screenshots/api_docs.png)
 
 ---
 
@@ -286,6 +321,7 @@ src/            Model loading and inference (src/predict.py), training and data 
 models/         Trained weights
 notebooks/      Exploration and analysis notebooks
 frontend/       Web UI assets
+docs/screenshots/  UI screenshots used in this README
 tests/          Tests
 docs/           Diagrams and plots
 reports/        Corrected evaluation CSVs
