@@ -54,31 +54,19 @@ The web interface lets users register, sign in, upload an image and view the pre
 
 ### Home
 
-![Home page](docs/screenshots/home.png)
+![Home page](docs/Home_Page.png)
 
 ### Sign Up
 
-![Sign up page](docs/screenshots/signup.png)
+![Sign up page](docs/sign_up.png)
 
 ### Login
 
-![Login page](docs/screenshots/login.png)
+![Login page](docs/login.png)
 
-### Upload and Predict
+### Prediction Result
 
-![Upload page](docs/screenshots/upload.png)
-
-### Prediction Result: Defective
-
-![Defective result](docs/screenshots/result_defective.png)
-
-### Prediction Result: Normal
-
-![Normal result](docs/screenshots/result_normal.png)
-
-### Interactive API Docs (Swagger UI)
-
-![Swagger UI](docs/screenshots/api_docs.png)
+![Defective result](docs/result_page.png)
 
 ---
 
