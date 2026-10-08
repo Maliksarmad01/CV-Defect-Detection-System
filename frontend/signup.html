@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Create Account | VisualDefect</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+
+</head>
+
+
+<body class="auth-page">
+
+
+<nav class="navbar">
+
+    <a href="/" class="logo">
+        Visual<span>Defect</span>
+    </a>
+
+    <div class="nav-links">
+
+        <a href="/">
+            Home
+        </a>
+
+        <a href="/login" class="nav-button">
+            Login
+        </a>
+
+    </div>
+
+</nav>
+
+
+<main class="auth-container">
+
+    <div class="auth-card">
+
+        <div class="auth-header">
+
+            <div class="auth-icon">
+                🚀
+            </div>
+
+            <h1>
+                Create Account
+            </h1>
+
+            <p>
+                Start using the visual defect detection system.
+            </p>
+
+        </div>
+
+
+        <div id="error-message" class="form-error"></div>
+
+
+        <form id="signup-form">
+
+
+            <div class="form-group">
+
+                <label for="name">
+                    Full Name
+                </label>
+
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    placeholder="Muhammad Sarmad"
+                    minlength="2"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="email">
+                    Email Address
+                </label>
+
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    placeholder="you@example.com"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="password">
+                    Password
+                </label>
+
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    placeholder="Minimum 6 characters"
+                    minlength="6"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="confirm-password">
+                    Confirm Password
+                </label>
+
+                <input
+                    type="password"
+                    id="confirm-password"
+                    placeholder="Repeat your password"
+                    minlength="6"
+                    required
+                >
+
+            </div>
+
+
+            <button
+                type="submit"
+                class="btn btn-primary full-width"
+                id="signup-button"
+            >
+                Create Account
+            </button>
+
+        </form>
+
+
+        <div class="auth-footer">
+
+            <span>
+                Already have an account?
+            </span>
+
+            <a href="/login">
+                Login
+            </a>
+
+        </div>
+
+    </div>
+
+</main>
+
+
+<script>
+
+const form =
+    document.getElementById("signup-form");
+
+const errorMessage =
+    document.getElementById("error-message");
+
+const signupButton =
+    document.getElementById("signup-button");
+
+
+form.addEventListener("submit", async function(event) {
+
+    event.preventDefault();
+
+
+    errorMessage.style.display =
+        "none";
+
+
+    const password =
+        document.getElementById("password").value;
+
+
+    const confirmPassword =
+        document.getElementById("confirm-password").value;
+
+
+    if (password !== confirmPassword) {
+
+        errorMessage.textContent =
+            "Passwords do not match.";
+
+        errorMessage.style.display =
+            "block";
+
+        return;
+
+    }
+
+
+    signupButton.disabled =
+        true;
+
+    signupButton.textContent =
+        "Creating account...";
+
+
+    const formData =
+        new FormData(form);
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/signup",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                data.detail ||
+                "Unable to create account."
+            );
+
+        }
+
+
+        window.location.href =
+            "/dashboard";
+
+    }
+
+    catch (error) {
+
+        errorMessage.textContent =
+            error.message;
+
+        errorMessage.style.display =
+            "block";
+
+    }
+
+    finally {
+
+        signupButton.disabled =
+            false;
+
+        signupButton.textContent =
+            "Create Account";
+
+    }
+
+});
+
+</script>
+
+
+</body>
+</html>

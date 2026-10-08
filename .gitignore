@@ -18,12 +18,15 @@ env/
 # Environment
 .env
 
+# User database
+users.db
+
 # Model files
 *.pth
 *.pt
 *.onnx
 
-# Deployment model
+# Keep deployment model
 !models/
 !models/best_model.pth
 

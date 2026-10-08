@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Dashboard | VisualDefect</title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+
+</head>
+
+
+<body>
+
+
+<nav class="navbar">
+
+    <a href="/" class="logo">
+        Visual<span>Defect</span>
+    </a>
+
+
+    <div class="nav-links">
+
+        <a href="/dashboard">
+            Dashboard
+        </a>
+
+        <a href="/logout">
+            Logout
+        </a>
+
+    </div>
+
+</nav>
+
+
+<main class="dashboard-container">
+
+
+    <!-- HEADER -->
+
+    <section class="dashboard-header">
+
+        <div>
+
+            <div class="small-label">
+                AI INSPECTION DASHBOARD
+            </div>
+
+            <h1>
+                Visual Defect Detection
+            </h1>
+
+            <p id="welcome-message">
+                Upload an image to begin analysis.
+            </p>
+
+        </div>
+
+
+        <div class="model-status">
+
+            <span class="status-dot"></span>
+
+            Model Online
+
+        </div>
+
+    </section>
+
+
+    <!-- UPLOAD -->
+
+    <section class="dashboard-grid">
+
+
+        <div class="dashboard-card">
+
+
+            <div class="card-header">
+
+                <div>
+
+                    <h2>
+                        Upload Image
+                    </h2>
+
+                    <p>
+                        Upload a product image for AI analysis.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div
+                class="upload-zone"
+                id="upload-zone"
+            >
+
+                <div class="upload-icon">
+                    📷
+                </div>
+
+                <h3>
+                    Select an image
+                </h3>
+
+                <p>
+                    JPG, JPEG or PNG
+                </p>
+
+
+                <input
+                    type="file"
+                    id="image-input"
+                    accept="image/jpeg,image/png"
+                >
+
+
+                <label
+                    for="image-input"
+                    class="btn btn-primary upload-button"
+                >
+                    Choose Image
+                </label>
+
+            </div>
+
+
+            <div
+                id="preview-container"
+                class="preview-container"
+            >
+
+                <img
+                    id="image-preview"
+                    class="image-preview"
+                    alt="Selected image"
+                >
+
+                <button
+                    id="remove-image"
+                    class="remove-button"
+                >
+                    Remove Image
+                </button>
+
+            </div>
+
+
+            <button
+                id="analyze-button"
+                class="btn btn-primary full-width analyze-button"
+                disabled
+            >
+                Analyze Image
+            </button>
+
+
+            <div
+                id="error-message"
+                class="form-error"
+            ></div>
+
+
+            <div
+                id="loading"
+                class="loading"
+            >
+
+                <div class="spinner"></div>
+
+                <p>
+                    Running deep learning inference...
+                </p>
+
+            </div>
+
+
+        </div>
+
+
+        <!-- RESULT -->
+
+        <div class="dashboard-card result-card">
+
+
+            <div class="card-header">
+
+                <div>
+
+                    <h2>
+                        Analysis Result
+                    </h2>
+
+                    <p>
+                        Model prediction and confidence.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div
+                id="empty-result"
+                class="empty-result"
+            >
+
+                <div class="empty-icon">
+                    📊
+                </div>
+
+                <h3>
+                    No Analysis Yet
+                </h3>
+
+                <p>
+                    Upload an image and click
+                    "Analyze Image" to see the result.
+                </p>
+
+            </div>
+
+
+            <div
+                id="result-content"
+                class="result-content"
+            >
+
+
+                <div
+                    id="prediction-badge"
+                    class="prediction-badge"
+                >
+                    Defective
+                </div>
+
+
+                <div class="confidence-section">
+
+                    <div class="confidence-header">
+
+                        <span>
+                            Confidence
+                        </span>
+
+                        <strong id="confidence">
+                            0%
+                        </strong>
+
+                    </div>
+
+
+                    <div class="progress-bar">
+
+                        <div
+                            id="confidence-bar"
+                            class="progress"
+                        ></div>
+
+                    </div>
+
+                </div>
+
+
+                <div class="probability-grid">
+
+
+                    <div class="probability-card">
+
+                        <span>
+                            Normal
+                        </span>
+
+                        <strong
+                            id="normal-probability"
+                        >
+                            0%
+                        </strong>
+
+                    </div>
+
+
+                    <div class="probability-card">
+
+                        <span>
+                            Defective
+                        </span>
+
+                        <strong
+                            id="defective-probability"
+                        >
+                            0%
+                        </strong>
+
+                    </div>
+
+
+                </div>
+
+
+                <div class="result-details">
+
+
+                    <div class="detail-row">
+
+                        <span>
+                            Model
+                        </span>
+
+                        <strong>
+                            EfficientNet-B0
+                        </strong>
+
+                    </div>
+
+
+                    <div class="detail-row">
+
+                        <span>
+                            Device
+                        </span>
+
+                        <strong id="device">
+                            CUDA
+                        </strong>
+
+                    </div>
+
+
+                    <div class="detail-row">
+
+                        <span>
+                            Task
+                        </span>
+
+                        <strong>
+                            Binary Classification
+                        </strong>
+
+                    </div>
+
+
+                </div>
+
+
+            </div>
+
+
+        </div>
+
+
+    </section>
+
+
+    <!-- MODEL INFORMATION -->
+
+    <section class="model-info-section">
+
+
+        <div class="dashboard-card">
+
+
+            <h2>
+                Model Information
+            </h2>
+
+
+            <div class="info-grid">
+
+
+                <div>
+
+                    <span>
+                        Architecture
+                    </span>
+
+                    <strong>
+                        EfficientNet-B0
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Classes
+                    </span>
+
+                    <strong>
+                        Normal / Defective
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Input
+                    </span>
+
+                    <strong>
+                        256 × 640
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Framework
+                    </span>
+
+                    <strong>
+                        PyTorch
+                    </strong>
+
+                </div>
+
+
+            </div>
+
+        </div>
+
+
+    </section>
+
+
+</main>
+
+
+<footer class="footer">
+
+    Visual<span>Defect</span>
+
+    · AI-Powered Visual Defect Detection
+
+</footer>
+
+
+<script src="/static/dashboard.js"></script>
+
+
+</body>
+
+</html>
