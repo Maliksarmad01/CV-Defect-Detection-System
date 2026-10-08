@@ -54,10 +54,10 @@ The web interface lets users register, sign in, upload an image and view the pre
 
 ### Home
 
-![Home Page](docs/HomePage.png)
+![Home Page](docs/Homepage.png)
 ### How it Works
 
-![Sign up page](docs/howitworks.png)
+![How it Works](docs/howitworks.png)
 
 ### Sign Up
 
