@@ -1,10 +1,7 @@
 from pathlib import Path
 import torch
 
-# ============================================================
-# PROJECT PATHS
-# Works locally on Windows and on Render/Linux
-# ============================================================
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -29,11 +26,6 @@ for directory in [
     directory.mkdir(parents=True, exist_ok=True)
 
 
-# ============================================================
-# DEVICE
-# Render will normally use CPU.
-# Local machine will use CUDA if available.
-# ============================================================
 
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
@@ -45,9 +37,6 @@ if DEVICE.type == "cuda":
     print(f"GPU: {torch.cuda.get_device_name(0)}")
 
 
-# ============================================================
-# IMAGE / DATA SETTINGS
-# ============================================================
 
 IMAGE_HEIGHT = 256
 IMAGE_WIDTH = 640
@@ -63,9 +52,6 @@ CLASS_NAMES = [
 ]
 
 
-# ============================================================
-# TRAINING SETTINGS
-# ============================================================
 
 EPOCHS = 10
 
