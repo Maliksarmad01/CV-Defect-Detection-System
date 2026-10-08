@@ -54,11 +54,14 @@ The web interface lets users register, sign in, upload an image and view the pre
 
 ### Home
 
-![Home page](docs/Home_Page.png)
+![Home Page](docs/HomePage.png)
+### How it Works
+
+![Sign up page](docs/howitworks.png)
 
 ### Sign Up
 
-![Sign up page](docs/sign_up.png)
+![Sign up page](docs/signup.png)
 
 ### Login
 
@@ -66,7 +69,7 @@ The web interface lets users register, sign in, upload an image and view the pre
 
 ### Prediction Result
 
-![Defective result](docs/result_page.png)
+![Result](docs/resultpage.png)
 
 ---
 
